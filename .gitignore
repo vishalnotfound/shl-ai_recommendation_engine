@@ -1,0 +1,31 @@
+# Environment
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Data (catalog is committed, but env secrets are not)
+# data/catalog.json is intentionally tracked
+
+# Logs
+*.log
