@@ -33,9 +33,9 @@ logger = logging.getLogger(__name__)
 
 FALLBACK_CLARIFY = ChatResponse(
     reply=(
-        "I'd be happy to help you find the right SHL assessment. "
-        "Could you tell me more about the role you're hiring for and "
-        "what skills or competencies you'd like to evaluate?"
+        "I can help narrow that down. "
+        "Could you tell me more about the role and what specific skills "
+        "or competencies you need to evaluate?"
     ),
     recommendations=[],
     end_of_conversation=False,
@@ -43,10 +43,9 @@ FALLBACK_CLARIFY = ChatResponse(
 
 FALLBACK_REFUSE = ChatResponse(
     reply=(
-        "I specialize in helping you select the right SHL assessments for your "
-        "hiring and talent management needs. I'm not able to help with that particular "
-        "request, but I'd be glad to assist you with assessment selection. "
-        "What role or skills are you looking to evaluate?"
+        "I specialize in selecting SHL assessments. "
+        "I cannot assist with that request, but I'm ready to help you build "
+        "an assessment shortlist. What role are you hiring for?"
     ),
     recommendations=[],
     end_of_conversation=False,
@@ -97,6 +96,9 @@ def _validate_recommendations(recs: list[dict]) -> list[Recommendation]:
                 name=rec["name"],
                 url=rec["url"],
                 test_type=rec["test_type"],
+                duration=rec.get("duration", "") or "",
+                keys=rec.get("keys", "") or "",
+                languages=rec.get("languages", "") or "",
             ))
         else:
             logger.warning(f"Dropped recommendation with invalid URL: {rec.get('name', '?')}")
@@ -124,6 +126,7 @@ def _parse_extraction(raw: dict) -> LLMExtractionResult:
             intent = "clarify"
 
         return LLMExtractionResult(
+            reasoning=raw.get("reasoning", ""),
             intent=intent,
             constraints=constraints,
             draft_reply=raw.get("draft_reply", ""),
@@ -132,6 +135,7 @@ def _parse_extraction(raw: dict) -> LLMExtractionResult:
             removals=raw.get("removals", []) or [],
             compare_items=raw.get("compare_items", []) or [],
             previous_shortlist_names=raw.get("previous_shortlist_names", []) or [],
+            is_confirmation=raw.get("is_confirmation", False),
         )
     except Exception as e:
         logger.error(f"Failed to parse extraction result: {e}")
@@ -169,25 +173,9 @@ async def handle_chat(request: ChatRequest) -> ChatResponse:
     )
 
     if raw_extraction is None:
-        # LLM failed — try direct retrieval using the last user message as a query
-        logger.warning("LLM extraction failed → attempting direct retrieval fallback")
-        last_user_msg = ""
-        for msg in reversed(conv_messages):
-            if msg["role"] == "user":
-                last_user_msg = msg["content"]
-                break
-
-        if last_user_msg:
-            fallback_results = search(query=last_user_msg, top_k=10)
-            if fallback_results:
-                validated = _validate_recommendations(fallback_results)
-                if validated:
-                    return ChatResponse(
-                        reply=f"Based on your request, here are some relevant SHL assessments I found.",
-                        recommendations=validated[:10],
-                        end_of_conversation=True,
-                    )
-
+        # LLM failed — return a safe fallback instead of blind-searching
+        # (blind search on off-topic text returns random results)
+        logger.warning("LLM extraction failed → returning clarification fallback")
         return FALLBACK_CLARIFY
 
     extraction = _parse_extraction(raw_extraction)
@@ -222,9 +210,9 @@ async def _handle_clarify(extraction: LLMExtractionResult) -> ChatResponse:
     reply = extraction.clarifying_question or extraction.draft_reply
     if not reply:
         reply = (
-            "I'd like to help you find the right assessment. "
-            "Could you tell me more about the role and what competencies "
-            "you'd like to evaluate?"
+            "I can help narrow that down. "
+            "Could you tell me more about the role and what specific competencies "
+            "you need to evaluate?"
         )
     return ChatResponse(
         reply=reply,
@@ -290,13 +278,12 @@ async def _handle_recommend(
             if llm_reply:
                 reply = llm_reply
 
-    if not reply:
-        reply = f"Based on your requirements, I've identified {len(validated)} relevant SHL assessments for you."
+        reply = "Here is the recommended assessment shortlist for those requirements."
 
     return ChatResponse(
         reply=reply,
         recommendations=validated[:10],
-        end_of_conversation=bool(validated),
+        end_of_conversation=extraction.is_confirmation,
     )
 
 
@@ -344,7 +331,7 @@ async def _handle_refine(
     return ChatResponse(
         reply=reply,
         recommendations=validated[:10],
-        end_of_conversation=bool(validated),
+        end_of_conversation=extraction.is_confirmation,
     )
 
 

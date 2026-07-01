@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from typing import Optional
 
@@ -22,8 +23,11 @@ logger = logging.getLogger(__name__)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-# Model: fast Groq-hosted model for low-latency inference
-MODEL = "llama-3.3-70b-versatile"
+# Primary model (best quality)
+PRIMARY_MODEL = "llama-3.3-70b-versatile"
+
+# Fallback model (faster, separate rate limit bucket)
+FALLBACK_MODEL = "llama-3.1-8b-instant"
 
 # Timeout per LLM call (seconds) — leaves headroom inside the 30s budget
 LLM_CALL_TIMEOUT = 10
@@ -74,35 +78,22 @@ async def chat_completion(
     json_mode: bool = False,
 ) -> Optional[str]:
     """
-    Make an async chat completion call to Groq with timeout and retry.
-
-    Args:
-        system_prompt: The system prompt
-        messages: List of {"role": ..., "content": ...} dicts
-        temperature: Sampling temperature
-        max_tokens: Max tokens in response
-        request_start_time: When the /chat request started (for budget tracking)
-        json_mode: Whether to request JSON output mode
-
-    Returns:
-        The response text, or None if all attempts fail.
+    Make an async chat completion call to Groq with timeout, retry,
+    and automatic model fallback on rate limit.
     """
     client = get_client()
     if client is None:
         logger.warning("No LLM client available (missing API key). Returning None.")
         return None
-        
+
     start = request_start_time or time.time()
 
     full_messages = [{"role": "system", "content": system_prompt}] + messages
 
-    # Cap message history to avoid exceeding context limits
-    # Keep system + last 16 messages (8 turns × 2 roles)
     if len(full_messages) > 17:
         full_messages = [full_messages[0]] + full_messages[-16:]
 
     kwargs = {
-        "model": MODEL,
         "messages": full_messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
@@ -110,33 +101,53 @@ async def chat_completion(
     if json_mode:
         kwargs["response_format"] = {"type": "json_object"}
 
-    for attempt in range(2):  # max 1 retry
+    models_to_try = [PRIMARY_MODEL, FALLBACK_MODEL]
+
+    for model in models_to_try:
         elapsed = time.time() - start
         remaining = TOTAL_BUDGET_SECONDS - elapsed
-
         if remaining < 3:
             logger.warning(f"LLM call skipped: only {remaining:.1f}s remaining in budget")
             return None
 
         try:
-            logger.info(f"LLM call attempt {attempt + 1}, {remaining:.1f}s remaining")
+            logger.info(f"LLM call with {model}, {remaining:.1f}s remaining")
+            kwargs["model"] = model
             response = await client.chat.completions.create(**kwargs)
             content = response.choices[0].message.content
-            logger.info(f"LLM call succeeded in {time.time() - start - elapsed:.1f}s")
+            call_time = time.time() - start - elapsed
+            logger.info(f"LLM call succeeded ({model}) in {call_time:.1f}s")
             return content
 
         except Exception as e:
+            error_type = type(e).__name__
+            is_rate_limit = "rate_limit" in str(e).lower() or "429" in str(e)
             elapsed_after = time.time() - start
             remaining_after = TOTAL_BUDGET_SECONDS - elapsed_after
+
             logger.warning(
-                f"LLM call attempt {attempt + 1} failed: {type(e).__name__}: {e} "
+                f"LLM call failed ({model}): {error_type}: {str(e)[:200]} "
                 f"({remaining_after:.1f}s remaining)"
             )
-            if attempt == 0 and remaining_after > 5:
-                logger.info("Retrying LLM call...")
+
+            if is_rate_limit and model == PRIMARY_MODEL:
+                logger.info(f"Rate limited on {PRIMARY_MODEL} -> trying {FALLBACK_MODEL}")
                 continue
+            elif remaining_after > 5:
+                try:
+                    logger.info(f"Retrying {model}...")
+                    response = await client.chat.completions.create(**kwargs)
+                    content = response.choices[0].message.content
+                    logger.info(f"Retry succeeded ({model})")
+                    return content
+                except Exception as retry_e:
+                    logger.error(f"Retry also failed: {type(retry_e).__name__}")
+                    if model == PRIMARY_MODEL:
+                        continue
+                    return None
             else:
-                logger.error("No more retries or insufficient time budget")
+                if model == PRIMARY_MODEL:
+                    continue
                 return None
 
     return None
@@ -167,14 +178,24 @@ async def extract_intent(
 
     # Parse JSON response
     try:
-        # Clean up common LLM quirks
         text = result.strip()
         if text.startswith("```"):
-            # Strip markdown code fences
             lines = text.split("\n")
             text = "\n".join(lines[1:-1]) if len(lines) > 2 else text
-        parsed = json.loads(text)
-        return parsed
+            
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
+        # Regex fallback
+        match = re.search(r'\{[\s\S]*\}', text)
+        if match:
+            return json.loads(match.group())
+
+        logger.error(f"No valid JSON found in LLM response: {text[:300]}")
+        return None
+
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse LLM JSON response: {e}\nRaw: {result[:500]}")
         return None

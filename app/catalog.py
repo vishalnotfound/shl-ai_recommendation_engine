@@ -120,8 +120,24 @@ def validate_url(url: str) -> bool:
 
 def item_to_recommendation(item: dict) -> dict:
     """Convert a catalog item dict to the recommendation response shape."""
+    # Format languages: show first 4, then (+N more)
+    langs = item.get("languages", [])
+    if len(langs) > 4:
+        lang_str = ", ".join(langs[:4]) + f" (+{len(langs) - 4} more)"
+    elif langs:
+        lang_str = ", ".join(langs)
+    else:
+        lang_str = "—"
+
+    # Format keys (category names)
+    keys_list = item.get("keys", [])
+    keys_str = ", ".join(keys_list) if keys_list else "—"
+
     return {
         "name": item["name"],
         "url": item["url"],
         "test_type": item["test_type"],
+        "duration": item.get("duration", "") or "—",
+        "keys": keys_str,
+        "languages": lang_str,
     }

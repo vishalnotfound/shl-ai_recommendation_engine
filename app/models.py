@@ -39,6 +39,9 @@ class Recommendation(BaseModel):
     name: str
     url: str
     test_type: str
+    duration: str = ""
+    keys: str = ""
+    languages: str = ""
 
 
 class ChatResponse(BaseModel):
@@ -71,6 +74,7 @@ class ExtractedConstraints(BaseModel):
 
 class LLMExtractionResult(BaseModel):
     """The structured output we ask the LLM to produce (intermediate, not wire format)."""
+    reasoning: str = ""             # Chain-of-thought reasoning
     intent: Literal["clarify", "recommend", "refine", "compare", "refuse"]
     constraints: ExtractedConstraints = ExtractedConstraints()
     draft_reply: str = ""
@@ -79,3 +83,4 @@ class LLMExtractionResult(BaseModel):
     removals: list[str] = []        # for refine: items/skills to remove
     compare_items: list[str] = []   # for compare: specific assessment names
     previous_shortlist_names: list[str] = []  # names already recommended
+    is_confirmation: bool = False   # user confirmed the final shortlist
