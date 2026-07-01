@@ -126,6 +126,7 @@ def _parse_extraction(raw: dict) -> LLMExtractionResult:
             intent = "clarify"
 
         return LLMExtractionResult(
+            reasoning=raw.get("reasoning", ""),
             intent=intent,
             constraints=constraints,
             draft_reply=raw.get("draft_reply", ""),

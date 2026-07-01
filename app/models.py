@@ -74,6 +74,7 @@ class ExtractedConstraints(BaseModel):
 
 class LLMExtractionResult(BaseModel):
     """The structured output we ask the LLM to produce (intermediate, not wire format)."""
+    reasoning: str = ""             # Chain-of-thought reasoning
     intent: Literal["clarify", "recommend", "refine", "compare", "refuse"]
     constraints: ExtractedConstraints = ExtractedConstraints()
     draft_reply: str = ""

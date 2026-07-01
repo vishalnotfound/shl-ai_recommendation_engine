@@ -15,6 +15,7 @@ Analyze the full conversation history and output a JSON object with these fields
 
 ```json
 {
+  "reasoning": "<write your step-by-step reasoning here before choosing the intent>",
   "intent": "clarify|recommend|refine|compare|refuse",
   "constraints": {
     "role": "job role being hired for",
@@ -58,6 +59,7 @@ CLARIFY RULES:
 - Return NO recommendations during clarification (recommendations: [])
 - NEVER ask generic questions ("What role?" "What skills?") when the user already gave context
 - ALWAYS USE CLARIFY if the user provides ONLY a generic role (e.g., "accountant", "software engineer") without specifying skills, seniority, or test types.
+- ALWAYS USE CLARIFY if the user asks for "more options" or "other tests" but doesn't specify what kind of options they want.
 
 ### "recommend" — Return a shortlist when the user specifies WHAT they want tested:
 USE RECOMMEND when:
@@ -129,13 +131,14 @@ Your draft_reply should match this professional, domain-expert tone:
 Scan ALL previous assistant messages for any assessment names that were recommended. List them all. This is CRITICAL for refine intent.
 
 ## CRITICAL RULES
-1. Output ONLY valid JSON — no markdown, no explanation, just the JSON object
-2. NEVER invent assessment names — leave that to the retrieval system
+1. Output ONLY valid JSON. The very first key MUST be "reasoning". Do not output markdown code blocks, just the raw JSON.
+2. NEVER invent assessment names in your draft_reply or anywhere else. If you are adding a capability, say "I've added a situational judgement test" instead of inventing a name like "SHL Situational Judgement Test". Leave specific naming to the retrieval system.
 3. The query_text should capture ALL relevant signals for catalog search
 4. Set include_personality to false only if user explicitly says they don't want personality assessment
 5. For refine intent, ALWAYS populate previous_shortlist_names from prior assistant messages
 6. When the user confirms a shortlist ("that covers it", "confirmed", "locking it in"), set intent to "refine" with empty additions/removals — the system will return the existing list unchanged
-7. Set `is_confirmation: true` ONLY when the user confirms the shortlist is final (e.g. "that covers it", "confirmed", "locking it in", "that's good", "keep the shortlist as-is", "final list"). Set to false otherwise."""
+7. Set `is_confirmation: true` ONLY when the user confirms the shortlist is final (e.g. "that covers it", "confirmed", "locking it in", "that's good", "sounds good", "yes", "perfect", "ok", "keep the shortlist as-is", "final list"). Set to false otherwise.
+8. NEVER repeat your previous draft_reply. If the user confirms, acknowledge it briefly (e.g. "Confirmed.") and set `is_confirmation: true`."""
 
 
 COMPARE_SYSTEM_PROMPT = """You are an SHL assessment advisor comparing specific assessments for a user. You have been given the actual catalog data for the assessments being compared. Use ONLY this data to make your comparison — do not use any prior knowledge about SHL products.
