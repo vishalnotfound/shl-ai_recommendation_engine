@@ -101,7 +101,7 @@ python -m tests.eval_harness --base-url http://localhost:8000 --traces-dir trace
 │   ├── test_schema.py
 │   ├── test_behaviors.py
 │   └── eval_harness.py
-├── traces/              # Place 10 public trace .md files here
+├── traces/              
 ├── requirements.txt
 ├── Procfile
 └── .env.example
